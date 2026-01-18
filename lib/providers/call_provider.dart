@@ -15,32 +15,34 @@ class CallProvider extends ChangeNotifier {
   Timer? _timer;
 
   Future<void> initAgora(bool isVideoCall) async {
+    debugPrint("called initAgora");
+
     engine = createAgoraRtcEngine();
 
     await engine.initialize(
       RtcEngineContext(appId: AgoraConfig.appId),
     );
 
+    await engine.setClientRole(
+      role: ClientRoleType.clientRoleBroadcaster,
+    );
+
+    await engine.enableAudio();
+
     if (isVideoCall) {
       await engine.enableVideo();
-    } else {
-      await engine.disableVideo();
-      await engine.enableAudio();
+      await engine.startPreview();
     }
 
     engine.registerEventHandler(
       RtcEngineEventHandler(
-        onJoinChannelSuccess: (connection, elapsed) {
-          isJoined = true;
-          _startTimer();
+        onJoinChannelSuccess: (_, __) {
+          debugPrint("JOINED CHANNEL");
           notifyListeners();
         },
-        onUserJoined: (connection, uid, elapsed) {
+        onUserJoined: (_, uid, __) {
+          debugPrint("REMOTE USER JOINED: $uid");
           remoteUid = uid;
-          notifyListeners();
-        },
-        onUserOffline: (connection,uid,reason) {
-          remoteUid = null;
           notifyListeners();
         },
       ),
@@ -53,6 +55,8 @@ class CallProvider extends ChangeNotifier {
       options: const ChannelMediaOptions(),
     );
   }
+
+
 
   void toggleMute() {
     isMuted = !isMuted;

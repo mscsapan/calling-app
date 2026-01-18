@@ -1,7 +1,17 @@
+import 'package:calling_app/screens/call_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'providers/call_provider.dart';
 
 void main() {
-  runApp(const MyApp());
+  // runApp(const MyApp());
+  runApp(
+    ChangeNotifierProvider<CallProvider>(
+      create: (context) => CallProvider(),
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -11,6 +21,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Flutter Demo',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(colorScheme: .fromSeed(seedColor: Colors.deepPurple)),
       home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
@@ -34,6 +45,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _counter++;
     });
   }
+  final imageUrl = 'https://developers.elementor.com/docs/assets/img/elementor-placeholder-image.png';
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +68,14 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
+        onPressed: (){
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => CallScreen(isVideoCall: true, name: 'Ali', imageUrl: imageUrl),
+            ),
+          );
+        },
+        // onPressed: _incrementCounter,
         tooltip: 'Increment',
         child: const Icon(Icons.add),
       ),

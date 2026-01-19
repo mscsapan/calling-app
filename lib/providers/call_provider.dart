@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'package:agora_rtc_engine/agora_rtc_engine.dart';
-import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
 
-import '../config/agora_config.dart';
+import 'package:flutter/material.dart';
 
 /*class CallProvider extends ChangeNotifier {
   late RtcEngine engine;
@@ -103,7 +100,11 @@ class CallProvider extends ChangeNotifier {
   bool _isVideoEnabled = true;
   bool _isSpeakerEnabled = true;
   bool _isRemoteUserJoined = false;
+  bool _isFrontCamera = true;
   int _remoteUid = 0;
+
+  // UI visibility state
+  bool _isUIVisible = true;
 
   // Call timer
   int _callDurationSeconds = 0;
@@ -114,6 +115,8 @@ class CallProvider extends ChangeNotifier {
   bool get isVideoEnabled => _isVideoEnabled;
   bool get isSpeakerEnabled => _isSpeakerEnabled;
   bool get isRemoteUserJoined => _isRemoteUserJoined;
+  bool get isFrontCamera => _isFrontCamera;
+  bool get isUIVisible => _isUIVisible;
   int get remoteUid => _remoteUid;
   String get callDuration => _formatDuration(_callDurationSeconds);
 
@@ -150,6 +153,18 @@ class CallProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Toggle camera (front/back)
+  void toggleCamera() {
+    _isFrontCamera = !_isFrontCamera;
+    notifyListeners();
+  }
+
+  // Toggle UI visibility
+  void toggleUIVisibility() {
+    _isUIVisible = !_isUIVisible;
+    notifyListeners();
+  }
+
   // Remote user joined
   void onRemoteUserJoined(int uid) {
     _isRemoteUserJoined = true;
@@ -182,6 +197,8 @@ class CallProvider extends ChangeNotifier {
     _isVideoEnabled = true;
     _isSpeakerEnabled = true;
     _isRemoteUserJoined = false;
+    _isFrontCamera = true;
+    _isUIVisible = true;
     _remoteUid = 0;
     _callDurationSeconds = 0;
     stopTimer();

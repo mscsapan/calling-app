@@ -6,7 +6,6 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../providers/call_provider.dart';
 
-
 class CallScreen extends StatefulWidget {
   final String userName;
   final String userRole;
@@ -26,15 +25,11 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateMixin {
-  // ==================== AGORA CONFIGURATION ====================
-  static const String appId = AgoraConfig.appId;
-  static const String token =''; // AgoraConfig.token
-  static const String channelName = AgoraConfig.channelName;
-
   // ==================== AGORA ENGINE ====================
   RtcEngine? _engine;
   bool _isEngineInitialized = false;
   bool _isJoined = false;
+  int _localUid = 0;
 
   // ==================== DRAGGABLE VIDEO PREVIEW ====================
   Offset _localVideoPosition = const Offset(0, 0);
@@ -49,8 +44,16 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _initializeAnimations();
+    _initializeCallProvider();
     _initializeAgora();
     _setInitialVideoPosition();
+  }
+
+  // ==================== PROVIDER INITIALIZATION ====================
+  void _initializeCallProvider() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<CallProvider>().initializeCallType(widget.isVideoCall);
+    });
   }
 
   // ==================== ANIMATIONS ====================
@@ -73,6 +76,7 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
 
   void _setInitialVideoPosition() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final size = MediaQuery.of(context).size;
       setState(() {
         _localVideoPosition = Offset(size.width - 140, 100);
@@ -83,20 +87,27 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
   // ==================== AGORA INITIALIZATION ====================
   Future<void> _initializeAgora() async {
     try {
+      debugPrint('🔵 Starting Agora initialization...');
+
       await _requestPermissions();
 
       _engine = createAgoraRtcEngine();
+      debugPrint('✅ Agora engine created');
 
       await _engine?.initialize(RtcEngineContext(
-        appId: appId,
+        appId: AgoraConfig.appId,
         channelProfile: ChannelProfileType.channelProfileCommunication,
       ));
+      debugPrint('✅ Agora engine initialized with AppId: ${AgoraConfig.appId}');
 
-      _engine!.registerEventHandler(
+      _engine?.registerEventHandler(
         RtcEngineEventHandler(
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            debugPrint('✅ Local user joined: ${connection.channelId}');
-            setState(() => _isJoined = true);
+            debugPrint('✅ Local user joined channel: ${connection.channelId}, UID: ${connection.localUid}');
+            setState(() {
+              _isJoined = true;
+              _localUid = connection.localUid ?? 0;
+            });
             context.read<CallProvider>().startTimer();
           },
           onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
@@ -104,8 +115,11 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
             context.read<CallProvider>().onRemoteUserJoined(remoteUid);
           },
           onUserOffline: (RtcConnection connection, int remoteUid, UserOfflineReasonType reason) {
-            debugPrint('❌ Remote user left: $remoteUid');
+            debugPrint('❌ Remote user left: $remoteUid, reason: $reason');
             context.read<CallProvider>().onRemoteUserLeft();
+          },
+          onRemoteVideoStateChanged: (RtcConnection connection, int remoteUid, RemoteVideoState state, RemoteVideoStateReason reason, int elapsed) {
+            debugPrint('📹 Remote video state changed: UID=$remoteUid, state=$state, reason=$reason');
           },
           onError: (ErrorCodeType err, String msg) {
             debugPrint('❌ Agora Error: $err - $msg');
@@ -113,32 +127,43 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
         ),
       );
 
+      // Enable audio
       await _engine?.enableAudio();
+      debugPrint('✅ Audio enabled');
 
+      // Enable video if video call
       if (widget.isVideoCall) {
         await _engine?.enableVideo();
         await _engine?.startPreview();
+        debugPrint('✅ Video enabled and preview started');
       } else {
         await _engine?.setDefaultAudioRouteToSpeakerphone(true);
+        debugPrint('✅ Speaker enabled for audio call');
       }
 
+      // Set client role as BROADCASTER
       await _engine?.setClientRole(role: ClientRoleType.clientRoleBroadcaster);
+      debugPrint('✅ Client role set to BROADCASTER');
 
       setState(() => _isEngineInitialized = true);
 
       await _joinChannel();
 
     } catch (e) {
-      debugPrint('❌ Agora init error: $e');
-      _showErrorDialog('Failed to initialize: $e');
+      debugPrint('❌ Agora initialization error: $e');
+      if (mounted) {
+        _showErrorDialog('Failed to initialize call: $e');
+      }
     }
   }
 
   Future<void> _requestPermissions() async {
     if (widget.isVideoCall) {
-      await [Permission.microphone, Permission.camera].request();
+      final status = await [Permission.microphone, Permission.camera].request();
+      debugPrint('📱 Permissions: $status');
     } else {
-      await [Permission.microphone].request();
+      final status = await [Permission.microphone].request();
+      debugPrint('📱 Permissions: $status');
     }
   }
 
@@ -146,10 +171,12 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     if (_engine == null) return;
 
     try {
+      debugPrint('📞 Attempting to join channel: ${AgoraConfig.channelName}');
+
       await _engine?.joinChannel(
-        token: token,
-        channelId: channelName,
-        uid: 0,
+        token: AgoraConfig.token,
+        channelId: AgoraConfig.channelName,
+        uid: 0, // 0 = auto-assign unique UID
         options: const ChannelMediaOptions(
           channelProfile: ChannelProfileType.channelProfileCommunication,
           clientRoleType: ClientRoleType.clientRoleBroadcaster,
@@ -160,9 +187,10 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
         ),
       );
 
-      debugPrint('📞 Joining channel: $channelName');
+      debugPrint('📞 Join channel request sent');
+      debugPrint('📞 Join channel token ${AgoraConfig.token}');
     } catch (e) {
-      debugPrint('❌ Join error: $e');
+      debugPrint('❌ Join channel error: $e');
     }
   }
 
@@ -171,23 +199,59 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     final provider = context.read<CallProvider>();
     await _engine?.muteLocalAudioStream(!provider.isMuted);
     provider.toggleMute();
+    debugPrint('🎤 Mute: ${!provider.isMuted}');
   }
 
   Future<void> _toggleVideo() async {
     final provider = context.read<CallProvider>();
+
+    // If turning video on for the first time in audio call
+    if (!provider.isVideoCall && !provider.isVideoEnabled) {
+      await _enableVideoInAudioCall();
+    }
+
     await _engine?.muteLocalVideoStream(!provider.isVideoEnabled);
     provider.toggleVideo();
+    debugPrint('📹 Video enabled: ${!provider.isVideoEnabled}');
+  }
+
+  // Enable video during audio call
+  Future<void> _enableVideoInAudioCall() async {
+    try {
+      // Request camera permission
+      await Permission.camera.request();
+
+      // Enable video
+      await _engine?.enableVideo();
+      await _engine?.startPreview();
+
+      // Update call type
+      context.read<CallProvider>().switchToVideoCall();
+
+      // Update channel to publish video
+      await _engine?.updateChannelMediaOptions(
+        const ChannelMediaOptions(
+          publishCameraTrack: true,
+        ),
+      );
+
+      debugPrint('✅ Video enabled in audio call');
+    } catch (e) {
+      debugPrint('❌ Error enabling video: $e');
+    }
   }
 
   Future<void> _toggleSpeaker() async {
     final provider = context.read<CallProvider>();
     await _engine?.setEnableSpeakerphone(!provider.isSpeakerEnabled);
     provider.toggleSpeaker();
+    debugPrint('🔊 Speaker: ${!provider.isSpeakerEnabled}');
   }
 
   Future<void> _switchCamera() async {
     await _engine?.switchCamera();
     context.read<CallProvider>().toggleCamera();
+    debugPrint('🔄 Camera switched');
   }
 
   Future<void> _endCall() async {
@@ -200,11 +264,16 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
 
     try {
       context.read<CallProvider>().stopTimer();
-      await _engine!.leaveChannel();
-      if (widget.isVideoCall) await _engine!.stopPreview();
+      await _engine?.leaveChannel();
+
+      final provider = context.read<CallProvider>();
+      if (provider.isVideoCall) {
+        await _engine?.stopPreview();
+      }
+
       debugPrint('📴 Left channel');
     } catch (e) {
-      debugPrint('❌ Leave error: $e');
+      debugPrint('❌ Leave channel error: $e');
     }
   }
 
@@ -219,7 +288,7 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     try {
       await _engine?.release();
       _engine = null;
-      debugPrint('🗑️ Agora disposed');
+      debugPrint('🗑️ Agora engine disposed');
     } catch (e) {
       debugPrint('❌ Dispose error: $e');
     }
@@ -246,7 +315,6 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     final previewHeight = 160.0;
     final padding = 16.0;
 
-    // Calculate distances to each corner
     final topLeft = Offset(padding, 100.0);
     final topRight = Offset(size.width - previewWidth - padding, 100.0);
     final bottomLeft = Offset(padding, size.height - previewHeight - 150.0);
@@ -254,7 +322,6 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
 
     final corners = [topLeft, topRight, bottomLeft, bottomRight];
 
-    // Find nearest corner
     Offset nearest = corners[0];
     double minDistance = (_localVideoPosition - corners[0]).distance;
 
@@ -302,18 +369,18 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     return Consumer<CallProvider>(
       builder: (context, provider, child) {
         return GestureDetector(
-          onTap: () => provider.toggleUIVisibility(),
+          onTap: () {
+            provider.showUI(); // Show and start auto-hide timer
+          },
           child: Stack(
             children: [
-              // Background: Local video (before remote joins) or Remote video (after remote joins)
-              widget.isVideoCall
-                  ? (provider.isRemoteUserJoined
-                  ? _buildRemoteVideoFullScreen()
-                  : _buildLocalVideoFullScreen())
+              // Background: Video or Audio UI
+              provider.isVideoCall
+                  ? _buildVideoBackground(provider)
                   : _buildAudioCallBackground(),
 
-              // Draggable local video preview (only when remote user joined and video enabled)
-              if (widget.isVideoCall &&
+              // Draggable local video preview
+              if (provider.isVideoCall &&
                   provider.isRemoteUserJoined &&
                   provider.isVideoEnabled)
                 _buildDraggableLocalPreview(),
@@ -330,7 +397,21 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Full screen local video (before remote joins)
+  // Video background logic
+  Widget _buildVideoBackground(CallProvider provider) {
+    if (provider.isVideoEnabled) {
+      // Show video
+      if (provider.isRemoteUserJoined) {
+        return _buildRemoteVideoFullScreen();
+      } else {
+        return _buildLocalVideoFullScreen();
+      }
+    } else {
+      // Video is off - show audio-style background
+      return _buildAudioCallBackground();
+    }
+  }
+
   Widget _buildLocalVideoFullScreen() {
     return AnimatedBuilder(
       animation: _animationController,
@@ -340,12 +421,14 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
           child: Transform.scale(
             scale: _scaleAnimation.value,
             child: SizedBox.expand(
-              child: AgoraVideoView(
+              child: _engine != null
+                  ? AgoraVideoView(
                 controller: VideoViewController(
                   rtcEngine: _engine!,
                   canvas: const VideoCanvas(uid: 0),
                 ),
-              ),
+              )
+                  : const SizedBox.shrink(),
             ),
           ),
         );
@@ -353,22 +436,24 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Full screen remote video
   Widget _buildRemoteVideoFullScreen() {
     final remoteUid = context.read<CallProvider>().remoteUid;
 
     return SizedBox.expand(
-      child: AgoraVideoView(
+      child: _engine != null
+          ? AgoraVideoView(
         controller: VideoViewController.remote(
           rtcEngine: _engine!,
           canvas: VideoCanvas(uid: remoteUid),
-          connection: const RtcConnection(channelId: channelName),
+          connection: RtcConnection(channelId: AgoraConfig.channelName),
         ),
+      )
+          : const Center(
+        child: CircularProgressIndicator(color: Colors.white),
       ),
     );
   }
 
-  // Draggable local video preview (PiP style)
   Widget _buildDraggableLocalPreview() {
     return AnimatedPositioned(
       duration: _isDragging ? Duration.zero : const Duration(milliseconds: 300),
@@ -394,19 +479,20 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: AgoraVideoView(
+            child: _engine != null
+                ? AgoraVideoView(
               controller: VideoViewController(
                 rtcEngine: _engine!,
                 canvas: const VideoCanvas(uid: 0),
               ),
-            ),
+            )
+                : const SizedBox.shrink(),
           ),
         ),
       ),
     );
   }
 
-  // Audio call background
   Widget _buildAudioCallBackground() {
     return Center(
       child: Column(
@@ -440,7 +526,6 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Animated top bar
   Widget _buildAnimatedTopBar(CallProvider provider) {
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 300),
@@ -492,7 +577,6 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Animated bottom controls
   Widget _buildAnimatedBottomControls(CallProvider provider) {
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 300),
@@ -509,7 +593,7 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
             colors: [Colors.black.withOpacity(0.8), Colors.transparent],
           ),
         ),
-        child: widget.isVideoCall
+        child: provider.isVideoCall
             ? _buildVideoCallControls(provider)
             : _buildAudioCallControls(provider),
       ),
@@ -536,6 +620,11 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
           isActive: true,
         ),
         _buildControlButton(
+          icon: provider.isSpeakerEnabled ? Icons.volume_up : Icons.volume_off,
+          onPressed: _toggleSpeaker,
+          isActive: provider.isSpeakerEnabled,
+        ),
+        _buildControlButton(
           icon: Icons.call_end,
           onPressed: _endCall,
           backgroundColor: Colors.red,
@@ -553,6 +642,11 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
           icon: provider.isMuted ? Icons.mic_off : Icons.mic,
           onPressed: _toggleMute,
           isActive: !provider.isMuted,
+        ),
+        _buildControlButton(
+          icon: Icons.videocam,
+          onPressed: _toggleVideo,
+          isActive: false,
         ),
         _buildControlButton(
           icon: provider.isSpeakerEnabled ? Icons.volume_up : Icons.volume_off,
@@ -585,6 +679,8 @@ class _CallScreenState extends State<CallScreen> with SingleTickerProviderStateM
   }
 
   void _showErrorDialog(String message) {
+    if (!mounted) return;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(

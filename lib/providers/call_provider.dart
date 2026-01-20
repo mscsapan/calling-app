@@ -94,6 +94,9 @@ import 'package:flutter/material.dart';
   }
 }*/
 
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+
 class CallProvider extends ChangeNotifier {
   // Call state
   bool _isMuted = false;
@@ -105,10 +108,14 @@ class CallProvider extends ChangeNotifier {
 
   // UI visibility state
   bool _isUIVisible = true;
+  Timer? _uiTimer;
+
+  // Call type - can switch from audio to video
+  bool _isVideoCall = true;
 
   // Call timer
   int _callDurationSeconds = 0;
-  Timer? _timer;
+  Timer? _callTimer;
 
   // Getters
   bool get isMuted => _isMuted;
@@ -117,13 +124,21 @@ class CallProvider extends ChangeNotifier {
   bool get isRemoteUserJoined => _isRemoteUserJoined;
   bool get isFrontCamera => _isFrontCamera;
   bool get isUIVisible => _isUIVisible;
+  bool get isVideoCall => _isVideoCall;
   int get remoteUid => _remoteUid;
   String get callDuration => _formatDuration(_callDurationSeconds);
+
+  // Initialize with call type
+  void initializeCallType(bool isVideo) {
+    _isVideoCall = isVideo;
+    _isVideoEnabled = isVideo;
+    notifyListeners();
+  }
 
   // Start call timer
   void startTimer() {
     _callDurationSeconds = 0;
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _callDurationSeconds++;
       notifyListeners();
     });
@@ -131,8 +146,8 @@ class CallProvider extends ChangeNotifier {
 
   // Stop call timer
   void stopTimer() {
-    _timer?.cancel();
-    _timer = null;
+    _callTimer?.cancel();
+    _callTimer = null;
   }
 
   // Toggle mute
@@ -159,10 +174,46 @@ class CallProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Toggle UI visibility
+  // Switch from audio call to video call
+  void switchToVideoCall() {
+    _isVideoCall = true;
+    _isVideoEnabled = true;
+    notifyListeners();
+  }
+
+  // Toggle UI visibility with auto-hide
   void toggleUIVisibility() {
     _isUIVisible = !_isUIVisible;
     notifyListeners();
+
+    // Auto-hide after 5 seconds if UI is visible
+    if (_isUIVisible) {
+      _startUIAutoHideTimer();
+    } else {
+      _cancelUIAutoHideTimer();
+    }
+  }
+
+  // Show UI (when user taps)
+  void showUI() {
+    _isUIVisible = true;
+    notifyListeners();
+    _startUIAutoHideTimer();
+  }
+
+  // Start auto-hide timer
+  void _startUIAutoHideTimer() {
+    _cancelUIAutoHideTimer();
+    _uiTimer = Timer(const Duration(seconds: 5), () {
+      _isUIVisible = false;
+      notifyListeners();
+    });
+  }
+
+  // Cancel auto-hide timer
+  void _cancelUIAutoHideTimer() {
+    _uiTimer?.cancel();
+    _uiTimer = null;
   }
 
   // Remote user joined
@@ -199,15 +250,18 @@ class CallProvider extends ChangeNotifier {
     _isRemoteUserJoined = false;
     _isFrontCamera = true;
     _isUIVisible = true;
+    _isVideoCall = true;
     _remoteUid = 0;
     _callDurationSeconds = 0;
     stopTimer();
+    _cancelUIAutoHideTimer();
     notifyListeners();
   }
 
   @override
   void dispose() {
     stopTimer();
+    _cancelUIAutoHideTimer();
     super.dispose();
   }
 }

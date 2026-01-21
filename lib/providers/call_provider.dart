@@ -94,8 +94,13 @@ import 'package:flutter/material.dart';
   }
 }*/
 
-import 'dart:async';
-import 'package:flutter/foundation.dart';
+enum CallStatus {
+  calling,      // Initiating call
+  ringing,      // Receiving call
+  connecting,   // Accepting call
+  connected,    // Call in progress
+  ended         // Call ended
+}
 
 class CallProvider extends ChangeNotifier {
   // Call state
@@ -104,13 +109,17 @@ class CallProvider extends ChangeNotifier {
   bool _isSpeakerEnabled = true;
   bool _isRemoteUserJoined = false;
   bool _isFrontCamera = true;
+  bool _isRemoteVideoEnabled = true;  // Track remote user's video state
   int _remoteUid = 0;
 
+  // Call status
+  CallStatus _callStatus = CallStatus.calling;
+
   // UI visibility state
-  bool _isUIVisible = true;
+  bool _isUIVisible = false;  // Initially hidden
   Timer? _uiTimer;
 
-  // Call type - can switch from audio to video
+  // Call type
   bool _isVideoCall = true;
 
   // Call timer
@@ -125,7 +134,9 @@ class CallProvider extends ChangeNotifier {
   bool get isFrontCamera => _isFrontCamera;
   bool get isUIVisible => _isUIVisible;
   bool get isVideoCall => _isVideoCall;
+  bool get isRemoteVideoEnabled => _isRemoteVideoEnabled;
   int get remoteUid => _remoteUid;
+  CallStatus get callStatus => _callStatus;
   String get callDuration => _formatDuration(_callDurationSeconds);
 
   // Initialize with call type
@@ -135,7 +146,13 @@ class CallProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Start call timer
+  // Set call status
+  void setCallStatus(CallStatus status) {
+    _callStatus = status;
+    notifyListeners();
+  }
+
+  // Start call timer (only when connected)
   void startTimer() {
     _callDurationSeconds = 0;
     _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -162,6 +179,12 @@ class CallProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Set remote video state
+  void setRemoteVideoEnabled(bool enabled) {
+    _isRemoteVideoEnabled = enabled;
+    notifyListeners();
+  }
+
   // Toggle speaker
   void toggleSpeaker() {
     _isSpeakerEnabled = !_isSpeakerEnabled;
@@ -181,30 +204,24 @@ class CallProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Toggle UI visibility with auto-hide
-  void toggleUIVisibility() {
-    _isUIVisible = !_isUIVisible;
-    notifyListeners();
-
-    // Auto-hide after 5 seconds if UI is visible
-    if (_isUIVisible) {
-      _startUIAutoHideTimer();
-    } else {
-      _cancelUIAutoHideTimer();
-    }
-  }
-
-  // Show UI (when user taps)
+  // Show UI with auto-hide timer (2 seconds)
   void showUI() {
     _isUIVisible = true;
     notifyListeners();
     _startUIAutoHideTimer();
   }
 
-  // Start auto-hide timer
+  // Hide UI immediately
+  void hideUI() {
+    _isUIVisible = false;
+    _cancelUIAutoHideTimer();
+    notifyListeners();
+  }
+
+  // Start auto-hide timer (2 seconds)
   void _startUIAutoHideTimer() {
     _cancelUIAutoHideTimer();
-    _uiTimer = Timer(const Duration(seconds: 5), () {
+    _uiTimer = Timer(const Duration(seconds: 2), () {
       _isUIVisible = false;
       notifyListeners();
     });
@@ -220,17 +237,25 @@ class CallProvider extends ChangeNotifier {
   void onRemoteUserJoined(int uid) {
     _isRemoteUserJoined = true;
     _remoteUid = uid;
+    _callStatus = CallStatus.connected;
     notifyListeners();
+
+    // Start timer only when both users are connected
+    if (_callTimer == null) {
+      startTimer();
+    }
   }
 
   // Remote user left
   void onRemoteUserLeft() {
     _isRemoteUserJoined = false;
     _remoteUid = 0;
+    _callStatus = CallStatus.ended;
+    stopTimer();
     notifyListeners();
   }
 
-  // Format duration (hh:mm:ss)
+  // Format duration (mm:ss or hh:mm:ss)
   String _formatDuration(int seconds) {
     int hours = seconds ~/ 3600;
     int minutes = (seconds % 3600) ~/ 60;
@@ -249,10 +274,12 @@ class CallProvider extends ChangeNotifier {
     _isSpeakerEnabled = true;
     _isRemoteUserJoined = false;
     _isFrontCamera = true;
-    _isUIVisible = true;
+    _isUIVisible = false;
     _isVideoCall = true;
+    _isRemoteVideoEnabled = true;
     _remoteUid = 0;
     _callDurationSeconds = 0;
+    _callStatus = CallStatus.calling;
     stopTimer();
     _cancelUIAutoHideTimer();
     notifyListeners();
